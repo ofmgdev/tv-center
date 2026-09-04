@@ -1,72 +1,56 @@
 # TV Center
 
 A self-hosted, Netflix-style library for your own downloaded TV shows.
+It's a single desktop app — no Node, Python, or setup required to use it.
 
-## Architecture
+## Using it
 
-- **`server/`** — Node.js + Express (TypeScript) API and video streaming server
-- **`python/`** — Python scanner: walks your media folder, parses filenames, fetches metadata (TMDb), writes to the shared database
-- **`frontend/`** — React app (Netflix-style browsing UI)
-- **`data/db.sqlite`** — shared SQLite database (created automatically)
-- **`media_test/`** — drop a few test video files here while developing
+1. Download `TV Center Setup <version>.exe` from the
+   [Releases page](https://github.com/ofmgdev/tv-center/releases) and install it.
+2. Launch **TV Center**. On first run it asks you to choose the folder that
+   holds your TV show files.
+3. It scans that folder, fetches posters/descriptions/episode titles
+   automatically (via the free [TVmaze](https://www.tvmaze.com/api) API — no
+   account needed), and opens your library.
 
-## How it fits together
+**File menu:**
+- **Change Media Folder…** — switch to a different folder and rescan
+- **Rescan Current Folder** — pick up newly added episodes
 
-1. Run the Python scanner → it scans your TV folder, matches files to shows/episodes, pulls posters/descriptions from TMDb, writes rows into `data/db.sqlite`.
-2. Run the Node server → it reads that same database and exposes a REST API (`/api/shows`, `/api/shows/:id/episodes`, `/api/stream/:episodeId`) and streams video files with proper seek support (HTTP range requests).
-3. The React frontend calls the API and renders the show grid + video player.
+Your folder choice and the library database live in your user profile
+(`%APPDATA%\tv-center`), not in the install directory.
 
-## Quick start (desktop app)
+### File naming
+
+Standard names work out of the box (`Show Name S01E02 ...mkv`). For names the
+parser can't read (e.g. Hebrew episode naming), use a folder layout of
+`<Show Name>/<... season N ...>/<episode file>` and the season/episode are
+taken from the folder + filename.
+
+> Note: `.mkv` and `.avi` files may not play if your system lacks the codec —
+> `.mp4` is the safe bet for in-app playback.
+
+## Project layout
+
+- **`desktop/`** — the Electron app. Contains everything:
+  - `lib/db.js` — SQLite schema/access (`better-sqlite3`)
+  - `lib/api.js` — Express REST API + range-request video streaming, and it
+    serves the built React UI
+  - `lib/scanner.js` — walks the media folder, parses filenames
+    (`parse-torrent-title` + a folder-based fallback), fetches metadata
+  - `lib/tvmaze.js` — metadata/poster lookup
+  - `main.js` — Electron main process: folder picker, wiring, menu
+- **`frontend/`** — React + Vite source for the UI. `npm run build` outputs
+  into `desktop/renderer/`, which the app serves.
+
+## Building from source
 
 ```bash
 cd desktop
 npm install
-npm start
+npm start          # build the UI + run the app
+npm run dist       # produce the Windows installer in desktop/release/
 ```
 
-On first launch it asks you to **choose your TV shows folder**. It then starts
-the API + frontend, scans that folder, and opens the library in a window.
-Use **File → Change Media Folder…** to switch folders later, or **File → Rescan
-Current Folder** after adding episodes. The choice is saved in `data/config.json`.
-
-Requires the `server/`, `frontend/`, and `python/` setups below to have been
-run once (npm install in each, plus the Python venv).
-
-## Getting started
-
-### 1. Python scanner setup
-
-```bash
-cd python
-python -m venv venv
-venv\Scripts\activate      # Windows
-pip install -r requirements.txt
-```
-
-Copy `.env.example` to `.env` and add your free TMDb API key (https://www.themoviedb.org/settings/api).
-
-Then edit `MEDIA_ROOT` in `.env` to point at your TV shows folder, and run:
-
-```bash
-python scan.py
-```
-
-### 2. Node server setup
-
-```bash
-cd server
-npm install
-npm run dev
-```
-
-Server starts on http://localhost:4000
-
-### 3. Frontend setup
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Frontend starts on http://localhost:5173 (Vite default) and talks to the API on port 4000.
+`npm install` pulls a prebuilt `better-sqlite3` binary for Electron — no
+compiler needed.

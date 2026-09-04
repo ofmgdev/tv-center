@@ -1,54 +1,36 @@
 "use strict";
 
 /**
- * TV Center desktop shell.
+ * TV Center — self-contained desktop app.
  *
- * On launch:
- *   1. Load the saved media folder (data/config.json). If there isn't one,
- *      show a native "choose folder" dialog.
- *   2. Start the API server (server/) and the Vite dev server (frontend/).
- *   3. Run the Python scanner against the chosen folder, streaming its
- *      output onto the loading screen.
- *   4. When the frontend is up, load it in the window.
+ * Everything runs inside Electron: the SQLite database, the REST/streaming
+ * API, the scanner, and the built React UI. No Node, Python, or npm needed
+ * on the user's machine.
  *
- * "File -> Change Media Folder..." re-runs the picker + scan.
- * "File -> Rescan Current Folder" re-runs the scan without the picker.
+ * On launch: load the saved media folder (or ask for one), start the local
+ * server, scan the folder, then show the library. The File menu can change
+ * the folder or rescan.
  */
 
-const { app, BrowserWindow, dialog, Menu, ipcMain } = require("electron");
-const { spawn } = require("node:child_process");
-const http = require("node:http");
+const { app, BrowserWindow, dialog, Menu, ipcMain, shell } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 
-const PROJECT_ROOT = path.join(__dirname, "..");
-const DATA_DIR = path.join(PROJECT_ROOT, "data");
-const CONFIG_PATH = path.join(DATA_DIR, "config.json");
-const DB_PATH = path.join(DATA_DIR, "db.sqlite");
+const { openDb } = require("./lib/db");
+const { createServer } = require("./lib/api");
+const { scan } = require("./lib/scanner");
 
-const SERVER_DIR = path.join(PROJECT_ROOT, "server");
-const FRONTEND_DIR = path.join(PROJECT_ROOT, "frontend");
-const PYTHON_DIR = path.join(PROJECT_ROOT, "python");
-const PYTHON_BIN = path.join(
-  PYTHON_DIR,
-  "venv",
-  process.platform === "win32" ? "Scripts/python.exe" : "bin/python"
-);
+const USER_DIR = app.getPath("userData");
+const DB_PATH = path.join(USER_DIR, "library.sqlite");
+const CONFIG_PATH = path.join(USER_DIR, "config.json");
+const RENDERER_DIR = path.join(__dirname, "renderer");
 
-const FRONTEND_URL = "http://localhost:5173";
-const API_PORT = 4000;
-
-const npmCmd = process.platform === "win32" ? "npm.cmd" : "npm";
-
-/** @type {BrowserWindow | null} */
 let win = null;
-/** @type {import('node:child_process').ChildProcess[]} */
-const children = [];
+let db = null;
+let baseUrl = "";
 let scanning = false;
 
-// ---------------------------------------------------------------------------
-// Config
-// ---------------------------------------------------------------------------
+// --- config ---------------------------------------------------------------
 
 function readConfig() {
   try {
@@ -59,210 +41,151 @@ function readConfig() {
 }
 
 function writeConfig(cfg) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.mkdirSync(USER_DIR, { recursive: true });
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2));
 }
 
-// ---------------------------------------------------------------------------
-// Loading screen helpers
-// ---------------------------------------------------------------------------
+// --- loading screen ------------------------------------------------------
 
 function showLoading() {
-  if (win) win.loadFile(path.join(__dirname, "loading.html"));
+  if (win && !win.isDestroyed()) win.loadFile(path.join(__dirname, "loading.html"));
 }
 
 function status(line) {
-  if (win && !win.isDestroyed()) {
-    win.webContents.send("status", line);
-  }
+  if (win && !win.isDestroyed()) win.webContents.send("status", line);
   process.stdout.write(line + "\n");
 }
 
-// ---------------------------------------------------------------------------
-// Child processes
-// ---------------------------------------------------------------------------
+// --- folder picker + scan ----------------------------------------------
 
-function startBackgroundServers() {
-  const env = { ...process.env, DB_PATH, PORT: String(API_PORT) };
-
-  const api = spawn(npmCmd, ["run", "dev"], {
-    cwd: SERVER_DIR,
-    env,
-    shell: process.platform === "win32",
-  });
-  api.stdout.on("data", (d) => process.stdout.write(`[api] ${d}`));
-  api.stderr.on("data", (d) => process.stderr.write(`[api] ${d}`));
-  children.push(api);
-
-  const web = spawn(npmCmd, ["run", "dev"], {
-    cwd: FRONTEND_DIR,
-    env,
-    shell: process.platform === "win32",
-  });
-  web.stdout.on("data", (d) => process.stdout.write(`[web] ${d}`));
-  web.stderr.on("data", (d) => process.stderr.write(`[web] ${d}`));
-  children.push(web);
-}
-
-function runScan(mediaRoot) {
-  return new Promise((resolve) => {
-    if (!fs.existsSync(PYTHON_BIN)) {
-      status(
-        `WARNING: Python venv not found at ${PYTHON_BIN}. Skipping scan — ` +
-          `open a terminal in python/ and set it up (see README).`
-      );
-      return resolve();
-    }
-
-    scanning = true;
-    status(`Scanning: ${mediaRoot}`);
-    status("This can take a while the first time (fetching posters)...\n");
-
-    const scan = spawn(PYTHON_BIN, ["scan.py"], {
-      cwd: PYTHON_DIR,
-      env: { ...process.env, MEDIA_ROOT: mediaRoot, DB_PATH, PYTHONIOENCODING: "utf-8" },
-    });
-    scan.stdout.on("data", (d) => String(d).split("\n").forEach((l) => l && status(l)));
-    scan.stderr.on("data", (d) => status(String(d).trim()));
-    scan.on("close", (code) => {
-      scanning = false;
-      status(`\nScan finished (exit ${code}).`);
-      resolve();
-    });
-    scan.on("error", (err) => {
-      scanning = false;
-      status(`Scan failed to start: ${err.message}`);
-      resolve();
-    });
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Wait for the frontend dev server, then load it
-// ---------------------------------------------------------------------------
-
-function waitForFrontend(timeoutMs = 60000) {
-  const start = Date.now();
-  return new Promise((resolve, reject) => {
-    const tick = () => {
-      const req = http.get(FRONTEND_URL, (res) => {
-        res.destroy();
-        resolve();
-      });
-      req.on("error", () => {
-        if (Date.now() - start > timeoutMs) return reject(new Error("frontend timeout"));
-        setTimeout(tick, 500);
-      });
-    };
-    tick();
-  });
-}
-
-async function openLibrary() {
-  status("Waiting for the frontend to start...");
-  try {
-    await waitForFrontend();
-  } catch {
-    status("Frontend did not come up in time — check the terminal for errors.");
-    return;
-  }
-  if (win && !win.isDestroyed()) win.loadURL(FRONTEND_URL);
-}
-
-// ---------------------------------------------------------------------------
-// Picker + scan flow
-// ---------------------------------------------------------------------------
-
-async function chooseFolder({ allowCancel }) {
+async function pickFolder({ allowCancel }) {
   const result = await dialog.showOpenDialog(win, {
     title: "Choose your TV shows folder",
     properties: ["openDirectory"],
   });
   if (result.canceled || result.filePaths.length === 0) {
-    return allowCancel ? null : chooseFolder({ allowCancel });
+    if (allowCancel) return null;
+    const { response } = await dialog.showMessageBox(win, {
+      type: "question",
+      buttons: ["Choose Folder", "Quit"],
+      defaultId: 0,
+      message: "TV Center needs a folder of TV shows to work.",
+    });
+    if (response === 1) {
+      app.quit();
+      return null;
+    }
+    return pickFolder({ allowCancel });
   }
   return result.filePaths[0];
 }
 
+async function doScan(mediaRoot, { silent = false } = {}) {
+  if (scanning) return;
+  scanning = true;
+  const log = silent ? (l) => process.stdout.write(l + "\n") : status;
+  if (!silent) {
+    showLoading();
+    log("This can take a while the first time (fetching posters)…\n");
+  }
+  try {
+    await scan(db, mediaRoot, log);
+  } catch (err) {
+    log(`Scan error: ${err && err.message ? err.message : err}`);
+  }
+  scanning = false;
+  if (win && !win.isDestroyed()) {
+    if (silent) win.webContents.reloadIgnoringCache();
+    else win.loadURL(baseUrl);
+  }
+}
+
 async function changeFolderAndScan() {
   if (scanning) return;
-  const folder = await chooseFolder({ allowCancel: true });
+  const folder = await pickFolder({ allowCancel: true });
   if (!folder) return;
   writeConfig({ ...readConfig(), mediaRoot: folder });
-  showLoading();
-  await runScan(folder);
-  await openLibrary();
+  await doScan(folder);
 }
 
 async function rescan() {
   if (scanning) return;
   const cfg = readConfig();
   if (!cfg.mediaRoot) return changeFolderAndScan();
-  showLoading();
-  await runScan(cfg.mediaRoot);
-  await openLibrary();
+  await doScan(cfg.mediaRoot);
 }
 
-// ---------------------------------------------------------------------------
-// App lifecycle
-// ---------------------------------------------------------------------------
+// --- menu -------------------------------------------------------------
 
 function buildMenu() {
-  const template = [
-    {
-      label: "File",
-      submenu: [
-        { label: "Change Media Folder…", click: changeFolderAndScan },
-        { label: "Rescan Current Folder", click: rescan },
-        { type: "separator" },
-        { role: "quit" },
-      ],
-    },
-    { label: "View", submenu: [{ role: "reload" }, { role: "toggleDevTools" }, { role: "togglefullscreen" }] },
-  ];
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate([
+      {
+        label: "File",
+        submenu: [
+          { label: "Change Media Folder…", click: changeFolderAndScan },
+          { label: "Rescan Current Folder", click: rescan },
+          { type: "separator" },
+          { role: "quit" },
+        ],
+      },
+      {
+        label: "View",
+        submenu: [
+          { label: "Home", accelerator: "Alt+Home", click: () => win && win.loadURL(baseUrl) },
+          { role: "reload" },
+          { role: "togglefullscreen" },
+          { role: "toggleDevTools" },
+        ],
+      },
+    ])
+  );
 }
 
+// --- boot ------------------------------------------------------------
+
 async function boot() {
+  db = openDb(DB_PATH);
+  const { port } = await createServer(db, RENDERER_DIR);
+  baseUrl = `http://127.0.0.1:${port}`;
+
   win = new BrowserWindow({
     width: 1280,
     height: 820,
     backgroundColor: "#141414",
     title: "TV Center",
+    autoHideMenuBar: false,
     webPreferences: { preload: path.join(__dirname, "preload.js") },
   });
+
+  // External links open in the real browser, not inside the app.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url);
+    return { action: "deny" };
+  });
+
   buildMenu();
   showLoading();
 
-  startBackgroundServers();
+  const cfg = readConfig();
+  const haveFolder = cfg.mediaRoot && fs.existsSync(cfg.mediaRoot);
 
-  let cfg = readConfig();
-  if (!cfg.mediaRoot || !fs.existsSync(cfg.mediaRoot)) {
-    const folder = await chooseFolder({ allowCancel: false });
-    cfg = { ...cfg, mediaRoot: folder };
-    writeConfig(cfg);
-    await runScan(folder);
+  if (!haveFolder) {
+    const folder = await pickFolder({ allowCancel: false });
+    if (!folder) return; // app is quitting
+    writeConfig({ ...cfg, mediaRoot: folder });
+    await doScan(folder);
   } else {
-    // Known folder: refresh in the background so new episodes show up.
-    runScan(cfg.mediaRoot);
+    win.loadURL(baseUrl);
+    // Refresh in the background so newly added episodes show up.
+    doScan(cfg.mediaRoot, { silent: true }).catch(() => {});
   }
-
-  await openLibrary();
 }
 
 ipcMain.handle("get-media-root", () => readConfig().mediaRoot || null);
 
 app.whenReady().then(boot);
-
 app.on("window-all-closed", () => app.quit());
-
-app.on("before-quit", () => {
-  for (const c of children) {
-    try {
-      if (process.platform === "win32") spawn("taskkill", ["/pid", String(c.pid), "/f", "/t"]);
-      else c.kill("SIGTERM");
-    } catch {
-      /* ignore */
-    }
-  }
+app.on("activate", () => {
+  if (BrowserWindow.getAllWindows().length === 0) boot();
 });

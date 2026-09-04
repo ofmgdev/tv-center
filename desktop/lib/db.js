@@ -1,18 +1,8 @@
-"""Shared SQLite schema/helpers used by the scanner (and readable by the Node server)."""
-import os
-import sqlite3
+"use strict";
 
-DB_PATH = os.getenv("DB_PATH", "../data/db.sqlite")
+const Database = require("better-sqlite3");
 
-
-def get_connection():
-    os.makedirs(os.path.dirname(os.path.abspath(DB_PATH)), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
-
-
-SCHEMA = """
+const SCHEMA = `
 CREATE TABLE IF NOT EXISTS shows (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
@@ -43,16 +33,14 @@ CREATE TABLE IF NOT EXISTS watch_progress (
     watched INTEGER NOT NULL DEFAULT 0,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
-"""
+`;
 
+function openDb(file) {
+  const db = new Database(file);
+  db.pragma("journal_mode = WAL");
+  db.pragma("foreign_keys = ON");
+  db.exec(SCHEMA);
+  return db;
+}
 
-def init_db():
-    conn = get_connection()
-    conn.executescript(SCHEMA)
-    conn.commit()
-    conn.close()
-
-
-if __name__ == "__main__":
-    init_db()
-    print(f"Database initialized at {os.path.abspath(DB_PATH)}")
+module.exports = { openDb };
