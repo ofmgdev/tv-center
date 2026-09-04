@@ -136,6 +136,27 @@ def upsert_episode(conn, show_id, show_title, tmdb_show_id, season, episode, fil
     print(f"    - S{season:02d}E{episode:02d}: {title or '(untitled)'}")
 
 
+def prune_stale(conn):
+    """
+    Drop episodes whose file is gone or no longer lives under MEDIA_ROOT
+    (e.g. after switching to a different media folder), then drop any show
+    left with no episodes. watch_progress rows cascade automatically.
+    """
+    root = os.path.normcase(os.path.abspath(MEDIA_ROOT)) + os.sep
+    removed = 0
+    for ep_id, file_path in conn.execute("SELECT id, file_path FROM episodes").fetchall():
+        p = os.path.normcase(os.path.abspath(file_path))
+        if not p.startswith(root) or not os.path.isfile(file_path):
+            conn.execute("DELETE FROM episodes WHERE id = ?", (ep_id,))
+            removed += 1
+    conn.execute(
+        "DELETE FROM shows WHERE id NOT IN (SELECT DISTINCT show_id FROM episodes)"
+    )
+    conn.commit()
+    if removed:
+        print(f"Pruned {removed} episode(s) no longer in {MEDIA_ROOT}")
+
+
 def main():
     if not os.path.isdir(MEDIA_ROOT):
         print(f"MEDIA_ROOT does not exist: {MEDIA_ROOT}")
@@ -170,6 +191,8 @@ def main():
 
         upsert_episode(conn, show_id, title, show_tmdb_cache[show_id], season, episode, path)
         count += 1
+
+    prune_stale(conn)
 
     conn.close()
     print(f"\nDone. Processed {count} episode file(s).")

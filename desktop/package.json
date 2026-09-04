@@ -1,0 +1,13 @@
+{
+  "name": "tv-center-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TV Center desktop shell (Electron): picks your media folder, runs the scanner, and opens the library.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^32.1.2"
+  }
+}

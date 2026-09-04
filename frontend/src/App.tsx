@@ -17,7 +17,8 @@ export default function App() {
       <div className="topbar">TV Center</div>
       {shows.length === 0 && (
         <p style={{ padding: "0 40px", opacity: 0.6 }}>
-          No shows yet — run the Python scanner to add your media.
+          No shows yet — pick your media folder from the File menu (Change
+          Media Folder…), or run the Python scanner manually.
         </p>
       )}
       <div className="grid">

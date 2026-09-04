@@ -16,6 +16,22 @@ A self-hosted, Netflix-style library for your own downloaded TV shows.
 2. Run the Node server → it reads that same database and exposes a REST API (`/api/shows`, `/api/shows/:id/episodes`, `/api/stream/:episodeId`) and streams video files with proper seek support (HTTP range requests).
 3. The React frontend calls the API and renders the show grid + video player.
 
+## Quick start (desktop app)
+
+```bash
+cd desktop
+npm install
+npm start
+```
+
+On first launch it asks you to **choose your TV shows folder**. It then starts
+the API + frontend, scans that folder, and opens the library in a window.
+Use **File → Change Media Folder…** to switch folders later, or **File → Rescan
+Current Folder** after adding episodes. The choice is saved in `data/config.json`.
+
+Requires the `server/`, `frontend/`, and `python/` setups below to have been
+run once (npm install in each, plus the Python venv).
+
 ## Getting started
 
 ### 1. Python scanner setup
