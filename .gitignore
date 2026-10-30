@@ -15,3 +15,10 @@ media_test/
 
 # Local data
 data/
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
