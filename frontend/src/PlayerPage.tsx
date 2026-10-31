@@ -1,7 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Episode } from "./types";
 import { Poster } from "./Poster";
+
+const code = (ep: Episode) =>
+  `S${String(ep.season).padStart(2, "0")}E${String(ep.episode).padStart(2, "0")}`;
 
 export default function PlayerPage() {
   const { episodeId } = useParams();
@@ -9,12 +12,14 @@ export default function PlayerPage() {
   const [episode, setEpisode] = useState<Episode | null>(null);
   const [episodes, setEpisodes] = useState<Episode[]>([]);
   const [showTitle, setShowTitle] = useState("");
+  const [season, setSeason] = useState<number | null>(null);
 
   useEffect(() => {
     fetch(`/api/episodes/${episodeId}`)
       .then((r) => r.json())
       .then((ep: Episode) => {
         setEpisode(ep);
+        setSeason(ep.season);
         fetch(`/api/shows/${ep.show_id}`)
           .then((r) => r.json())
           .then((show) => setShowTitle(show.title));
@@ -24,61 +29,74 @@ export default function PlayerPage() {
       });
   }, [episodeId]);
 
+  const seasons = useMemo(
+    () => Array.from(new Set(episodes.map((e) => e.season))).sort((a, b) => a - b),
+    [episodes]
+  );
+  const visible = episodes.filter((e) => e.season === season);
+
+  const index = episodes.findIndex((e) => String(e.id) === episodeId);
+  const next = index >= 0 ? episodes[index + 1] : undefined;
+
   return (
     <div>
-      <button
-        onClick={() => navigate(-1)}
-        className="back-link"
-        style={{ background: "none", border: "none", cursor: "pointer", color: "#fff" }}
-      >
-        &larr; Back
-      </button>
-      <video key={episodeId} controls autoPlay src={`/api/stream/${episodeId}`} />
+      <div className="player-bar">
+        <button onClick={() => navigate(-1)} className="back-btn">← Back</button>
+        <span className="logo small">TV CENTER</span>
+      </div>
+
+      <video
+        key={episodeId}
+        controls
+        autoPlay
+        src={`/api/stream/${episodeId}`}
+        onEnded={() => next && navigate(`/watch/${next.id}`)}
+      />
 
       {episode && (
-        <div style={{ padding: "16px 40px" }}>
-          <div style={{ fontSize: 20, fontWeight: 700 }}>
-            {showTitle} — S{String(episode.season).padStart(2, "0")}E
-            {String(episode.episode).padStart(2, "0")}
-            {episode.title ? `: ${episode.title}` : ""}
-          </div>
-          {episode.overview && (
-            <p style={{ opacity: 0.8, maxWidth: 700 }}>{episode.overview}</p>
+        <div className="now-playing">
+          <div className="eyebrow">{showTitle}</div>
+          <h2>
+            {code(episode)}
+            {episode.title ? ` · ${episode.title}` : ""}
+          </h2>
+          {episode.overview && <p>{episode.overview}</p>}
+          {next && (
+            <Link to={`/watch/${next.id}`} className="btn ghost">
+              Next: {code(next)} ▶
+            </Link>
           )}
         </div>
       )}
 
-      <div style={{ padding: "8px 40px 0", fontSize: 18, fontWeight: 600 }}>
-        More episodes
-      </div>
-      <div>
-        {episodes.map((ep) => (
+      <h3 className="section-title">More episodes</h3>
+      {seasons.length > 1 && (
+        <div className="tabs">
+          {seasons.map((s) => (
+            <button key={s} className={s === season ? "tab active" : "tab"} onClick={() => setSeason(s)}>
+              Season {s}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="episodes">
+        {visible.map((ep) => (
           <Link
             key={ep.id}
             to={`/watch/${ep.id}`}
-            className="episode-row"
-            style={
-              String(ep.id) === episodeId
-                ? { background: "#1f1f1f" }
-                : undefined
-            }
+            className={String(ep.id) === episodeId ? "episode-row current" : "episode-row"}
           >
-            <Poster
-              className="episode-thumb"
-              title={showTitle}
-              src={ep.thumbnail_url}
-              aspect="16 / 9"
-              showLabel={false}
-            />
-            <div>
-              <div style={{ fontWeight: 600 }}>
-                S{String(ep.season).padStart(2, "0")}E{String(ep.episode).padStart(2, "0")}
-                {ep.title ? ` — ${ep.title}` : ""}
-                {String(ep.id) === episodeId ? "  (playing)" : ""}
+            <span className="ep-num">{ep.episode}</span>
+            <div className="thumb-wrap">
+              <Poster className="episode-thumb" title={showTitle} src={ep.thumbnail_url} aspect="16 / 9" showLabel={false} />
+              <span className="thumb-play">▶</span>
+            </div>
+            <div className="ep-info">
+              <div className="ep-title">
+                {code(ep)} · {ep.title || `Episode ${ep.episode}`}
+                {String(ep.id) === episodeId ? "  — playing" : ""}
               </div>
-              {ep.overview && (
-                <div style={{ fontSize: 13, opacity: 0.7, maxWidth: 600 }}>{ep.overview}</div>
-              )}
+              {ep.overview && <div className="ep-overview">{ep.overview}</div>}
             </div>
           </Link>
         ))}

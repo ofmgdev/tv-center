@@ -6,6 +6,8 @@ export interface Show {
   poster_url: string | null;
   backdrop_url: string | null;
   first_air_date: string | null;
+  episode_count?: number;
+  season_count?: number;
 }
 
 export interface Episode {

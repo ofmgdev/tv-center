@@ -21,35 +21,32 @@ function parseFromFolders(filePath) {
   const filename = path.basename(filePath, path.extname(filePath));
 
   const seasonMatch = SEASON_FOLDER_RE.exec(seasonFolder);
-  if (!seasonMatch) return null;
+  if (!seasonMatch || !showFolder) return null;
 
   const epMatch = EPISODE_FILE_RE.exec(filename) || TRAILING_NUMBER_RE.exec(filename);
-  if (!epMatch) return null;
-
-  if (!showFolder) return null;
 
   return {
     title: titleCase(showFolder.trim()),
     season: Number(seasonMatch[1]),
-    episode: Number(epMatch[1]),
+    episode: epMatch ? Number(epMatch[1]) : null,
   };
 }
 
-/** Returns { title, season, episode } or null. */
+/**
+ * Returns { title, season, episode } or null.
+ *
+ * When the file sits in <Show>/<... season N ...>/ the folder names are the
+ * most reliable source for the show title and season (filenames are often
+ * localized or full of release junk like "1080p"). The filename parser still
+ * supplies the episode number when it can read one.
+ */
 function parseEpisode(filePath) {
   const g = ptt.parse(path.basename(filePath));
-  let title = g.title;
-  let season = g.season;
-  let episode = g.episode;
+  const fb = parseFromFolders(filePath);
 
-  if (!title || season == null || episode == null) {
-    const fb = parseFromFolders(filePath);
-    if (fb) {
-      title = title || fb.title;
-      season = season == null ? fb.season : season;
-      episode = episode == null ? fb.episode : episode;
-    }
-  }
+  let title = fb ? fb.title : g.title;
+  let season = g.season != null ? g.season : fb && fb.season;
+  let episode = g.episode != null ? g.episode : fb && fb.episode;
 
   if (!title || season == null || episode == null) return null;
   return { title: String(title).trim(), season, episode };

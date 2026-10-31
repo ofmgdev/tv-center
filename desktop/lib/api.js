@@ -24,7 +24,16 @@ function createServer(db, staticDir) {
 
   // --- Shows -------------------------------------------------------------
   app.get("/api/shows", (_req, res) => {
-    res.json(db.prepare("SELECT * FROM shows ORDER BY title").all());
+    res.json(
+      db
+        .prepare(
+          `SELECT s.*,
+                  (SELECT COUNT(*) FROM episodes e WHERE e.show_id = s.id) AS episode_count,
+                  (SELECT COUNT(DISTINCT season) FROM episodes e WHERE e.show_id = s.id) AS season_count
+           FROM shows s ORDER BY s.title`
+        )
+        .all()
+    );
   });
 
   app.get("/api/shows/:id", (req, res) => {

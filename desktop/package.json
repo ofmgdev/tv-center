@@ -1,6 +1,6 @@
 {
   "name": "tv-center",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "Self-hosted, Netflix-style library for your own downloaded TV shows.",
   "author": "ofmgdev",
@@ -29,6 +29,7 @@
       "main.js",
       "preload.js",
       "loading.html",
+      "welcome.html",
       "lib/**/*",
       "renderer/**/*"
     ],

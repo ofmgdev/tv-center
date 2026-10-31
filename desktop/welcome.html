@@ -1,0 +1,131 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>TV Center</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0; height: 100%; overflow: hidden;
+        background: #0b0b0c; color: #f2f2f2;
+        font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      }
+
+      /* Poster collage behind everything */
+      .collage {
+        position: fixed; inset: -10%;
+        display: grid; grid-template-columns: repeat(6, 1fr); gap: 16px;
+        transform: rotate(-6deg) scale(1.1);
+        opacity: 0; transition: opacity 1.2s ease;
+        filter: blur(2px) saturate(1.1);
+      }
+      .collage.ready { opacity: .5; }
+      .collage img {
+        width: 100%; aspect-ratio: 2 / 3; object-fit: cover; border-radius: 10px;
+        animation: drift 28s ease-in-out infinite alternate;
+      }
+      .collage img:nth-child(even) { animation-duration: 36s; animation-direction: alternate-reverse; }
+      @keyframes drift { from { transform: translateY(-4%); } to { transform: translateY(6%); } }
+
+      .shade {
+        position: fixed; inset: 0;
+        background:
+          radial-gradient(ellipse at 50% 45%, rgba(11,11,12,.55) 0%, rgba(11,11,12,.92) 70%),
+          linear-gradient(180deg, rgba(229,9,20,.12), transparent 40%);
+      }
+
+      .wrap {
+        position: relative; z-index: 1; height: 100%;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        text-align: center; padding: 24px;
+        animation: rise .8s ease both;
+      }
+      @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+
+      .logo {
+        font-size: 64px; font-weight: 800; letter-spacing: 8px; margin: 0;
+        background: linear-gradient(180deg, #ff4b55, #e50914 60%, #a30610);
+        -webkit-background-clip: text; background-clip: text; color: transparent;
+        filter: drop-shadow(0 6px 24px rgba(229, 9, 20, .45));
+      }
+      .tag { margin: 10px 0 38px; font-size: 17px; opacity: .72; letter-spacing: .5px; }
+
+      .actions { display: flex; flex-direction: column; gap: 14px; align-items: center; }
+      button {
+        font: inherit; cursor: pointer; border: none; border-radius: 12px;
+        padding: 15px 34px; font-size: 16px; font-weight: 600; min-width: 300px;
+        transition: transform .12s ease, box-shadow .12s ease, background .12s ease, opacity .12s;
+      }
+      button:disabled { opacity: .55; cursor: default; transform: none !important; }
+      .primary { background: #e50914; color: #fff; box-shadow: 0 8px 30px rgba(229, 9, 20, .4); }
+      .primary:hover:not(:disabled) { background: #f6121d; transform: translateY(-2px); box-shadow: 0 12px 34px rgba(229, 9, 20, .55); }
+      .ghost { background: rgba(255,255,255,.08); color: #fff; backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,.14); }
+      .ghost:hover:not(:disabled) { background: rgba(255,255,255,.16); transform: translateY(-2px); }
+      .folder { font-size: 12.5px; font-weight: 400; opacity: .75; display: block; margin-top: 3px; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .note { margin-top: 22px; font-size: 13px; opacity: .55; max-width: 360px; line-height: 1.5; }
+      .note.warn { color: #ffb4b8; opacity: .9; }
+      [hidden] { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <div class="collage" id="collage"></div>
+    <div class="shade"></div>
+
+    <div class="wrap">
+      <h1 class="logo">TV CENTER</h1>
+      <div class="tag">Your shows. Your library. Your screen.</div>
+
+      <div class="actions">
+        <button class="primary" id="continue" hidden>
+          ▶ Continue
+          <span class="folder" id="folderName"></span>
+        </button>
+        <button class="ghost" id="pick">📁 Choose a folder</button>
+      </div>
+      <div class="note" id="note"></div>
+    </div>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const cont = $("continue"), pick = $("pick"), note = $("note");
+
+      async function init() {
+        const root = await window.tvcenter.getMediaRoot();
+        if (root) {
+          $("folderName").textContent = root.path;
+          if (root.available) {
+            cont.hidden = false;
+          } else {
+            note.textContent = `Can't reach ${root.path} — is the drive connected? Plug it in and restart, or choose another folder.`;
+            note.classList.add("warn");
+          }
+        } else {
+          note.textContent = "Pick the folder that holds your TV shows and I'll get your library ready.";
+        }
+
+        // Poster collage from the saved library
+        try {
+          const posters = await window.tvcenter.getPosters();
+          if (posters.length) {
+            const list = [];
+            while (list.length < 18) list.push(...posters);
+            $("collage").innerHTML = list.slice(0, 18).map((u) => `<img src="${u}" alt="" />`).join("");
+            $("collage").classList.add("ready");
+          }
+        } catch {}
+      }
+
+      cont.addEventListener("click", async () => {
+        cont.disabled = pick.disabled = true;
+        const ok = await window.tvcenter.continueFolder();
+        if (!ok) cont.disabled = pick.disabled = false;
+      });
+      pick.addEventListener("click", async () => {
+        cont.disabled = pick.disabled = true;
+        const started = await window.tvcenter.chooseFolder();
+        if (!started) cont.disabled = pick.disabled = false;
+      });
+      init();
+    </script>
+  </body>
+</html>

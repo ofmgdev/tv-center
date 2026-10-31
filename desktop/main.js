@@ -95,8 +95,17 @@ async function doScan(mediaRoot, { silent = false } = {}) {
   }
   scanning = false;
   if (win && !win.isDestroyed()) {
-    if (silent) win.webContents.reloadIgnoringCache();
-    else win.loadURL(baseUrl);
+    if (!silent) win.loadURL(baseUrl);
+    else {
+      // Background refresh: only reload the home page so playback isn't cut off.
+      let onHome = false;
+      try {
+        onHome = new URL(win.webContents.getURL()).pathname === "/";
+      } catch {
+        /* ignore */
+      }
+      if (onHome) win.webContents.reloadIgnoringCache();
+    }
   }
 }
 
@@ -167,22 +176,50 @@ async function boot() {
   buildMenu();
   showLoading();
 
-  const cfg = readConfig();
-  const haveFolder = cfg.mediaRoot && fs.existsSync(cfg.mediaRoot);
-
-  if (!haveFolder) {
-    const folder = await pickFolder({ allowCancel: false });
-    if (!folder) return; // app is quitting
-    writeConfig({ ...cfg, mediaRoot: folder });
-    await doScan(folder);
-  } else {
-    win.loadURL(baseUrl);
-    // Refresh in the background so newly added episodes show up.
-    doScan(cfg.mediaRoot, { silent: true }).catch(() => {});
-  }
+  // Cover page on every launch: continue with the saved folder or pick another.
+  win.loadFile(path.join(__dirname, "welcome.html"));
 }
 
-ipcMain.handle("get-media-root", () => readConfig().mediaRoot || null);
+/** Open the library for the saved folder (instantly if already scanned). */
+function continueWithSavedFolder() {
+  const { mediaRoot } = readConfig();
+  if (!mediaRoot || !fs.existsSync(mediaRoot)) return false;
+  const { n } = db.prepare("SELECT COUNT(*) AS n FROM episodes").get();
+  if (n === 0) {
+    // Nothing saved yet: show the scan progress instead of an empty page.
+    doScan(mediaRoot).catch(() => {});
+  } else {
+    win.loadURL(baseUrl);
+    // Library opens instantly; refresh quietly for newly added episodes.
+    doScan(mediaRoot, { silent: true }).catch(() => {});
+  }
+  return true;
+}
+
+ipcMain.handle("get-media-root", () => {
+  const { mediaRoot } = readConfig();
+  return mediaRoot ? { path: mediaRoot, available: fs.existsSync(mediaRoot) } : null;
+});
+
+ipcMain.handle("continue-folder", () => continueWithSavedFolder());
+
+// Poster URLs for the cover page's background collage.
+ipcMain.handle("get-posters", () =>
+  db
+    .prepare("SELECT poster_url FROM shows WHERE poster_url IS NOT NULL ORDER BY RANDOM() LIMIT 12")
+    .all()
+    .map((r) => r.poster_url)
+);
+
+// Called by the welcome screen's button. Returns true if a scan was started.
+ipcMain.handle("choose-folder", async () => {
+  if (scanning) return false;
+  const folder = await pickFolder({ allowCancel: true });
+  if (!folder) return false;
+  writeConfig({ ...readConfig(), mediaRoot: folder });
+  doScan(folder);
+  return true;
+});
 
 app.whenReady().then(boot);
 app.on("window-all-closed", () => app.quit());
