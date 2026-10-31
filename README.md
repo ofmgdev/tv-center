@@ -3,6 +3,29 @@
 A self-hosted, Netflix-style library for your own downloaded TV shows.
 It's a single desktop app — no Node, Python, or setup required to use it.
 
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/library.png" alt="Library home with featured show" width="100%" />
+  <br />
+  <em>Library — a featured show up top and your whole collection below.</em>
+</p>
+
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <img src="docs/screenshots/welcome.png" alt="Welcome screen" />
+      <br />
+      <em>Welcome — continue with your saved folder or pick another.</em>
+    </td>
+    <td width="50%" align="center">
+      <img src="docs/screenshots/series.png" alt="Series page with seasons and episodes" />
+      <br />
+      <em>Series — browse episodes season by season.</em>
+    </td>
+  </tr>
+</table>
+
 ## Using it
 
 1. Download `TV Center Setup <version>.exe` from the
